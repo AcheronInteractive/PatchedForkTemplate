@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+
+# resolve shell-specifics
+case "$(echo "$SHELL" | sed -E 's|/usr(/local)?||g')" in
+    "/bin/zsh")
+        RCPATH="$HOME/.zshrc"
+        SOURCE="${BASH_SOURCE[0]:-${(%):-%N}}"
+    ;;
+    *)
+        RCPATH="$HOME/.bashrc"
+        if [[ -f "$HOME/.bash_aliases" ]]; then
+            RCPATH="$HOME/.bash_aliases"
+        fi
+        SOURCE="${BASH_SOURCE[0]}"
+    ;;
+esac
+
+# get base dir regardless of execution location
+while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
+    DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+done
+SOURCE=$([[ "$SOURCE" = /* ]] && echo "$SOURCE" || echo "$PWD/${SOURCE#./}")
+basedir=$(dirname "$SOURCE")
+
+. $basedir/scripts/init.sh
+
+patcherstash() {
+	STASHED=$(git stash)
+}
+
+patcherunstash() {
+	if [[ "$STASHED" != "No local changes to save" ]] ; then
+		git stash pop
+	fi
+}
+
+case "$1" in
+	"rb" | "rbp" | "rebuild")
+	(
+		set -e
+		cd "$basedir"
+		scripts/rebuildPatches.sh "$basedir" || exit 1
+	)
+	;;
+	"p" | "patch" | "apply")
+	(
+		set -e
+		cd "$basedir"
+		scripts/apply.sh "$basedir" || exit 1
+	)
+	;;
+	"b" | "bu" | "build")
+	(
+		basedir
+		cd ${FORK_NAME}
+		if [ -f gradlew ]; then ./gradlew clean build; else mvn clean package; fi
+	)
+	;;
+	"r" | "root")
+		cd "$basedir"
+	;;
+	"upstream")
+		cd "$basedir/$UPSTREAM_NAME"
+	;;
+	"fork")
+		cd "$basedir/$FORK_NAME"
+	;;
+	"setup")
+		if [[ -f ~/.bashrc ]] ; then
+			NAME="patcher"
+			if [[ ! -z "${2+x}" ]] ; then
+				NAME="$2"
+			fi
+			(grep "alias $NAME=" ~/.bashrc > /dev/null) && (sed -i "s|alias $NAME=.*|alias $NAME='. $SOURCE'|g" ~/.bashrc) || (echo "alias $NAME='. $SOURCE'" >> ~/.bashrc)
+			alias "$NAME=. $SOURCE"
+			echo "You dcan now just type '$NAME' at any time to access the patcher tool."
+		fi
+	;;
+	*)
+		echo "Build tool command. This provides a variety of commands to build and manage the patcher build"
+		echo "environment. For all of the functionality of this command to be available, you must first run the"
+		echo "'setup' command. View below for details. For essential building and patching, you do not need to do the setup."
+		echo ""
+		echo " Normal commands:"
+		echo "  * rb, rebuild  | Rebuild patches, can be called from anywhere."
+		echo "  * p, patch     | Apply all patches to top of the upstream project without building it. Can be run from anywhere."
+		echo "  * b, build     | Build fork. Can be ran anywhere."
+		echo ""
+		echo " These commands require the setup command before use:"
+		echo "  * r, root      | Change directory to the root of the project."
+		echo "  * upstream     | Change directory to the upstream folder."
+		echo "  * fork         | Change directory to the fork folder."
+		echo "  * setup        | Add an alias to .bashrc to allow full functionality of this script. Run as:"
+		echo "                 |     . ./patcher setup"
+		echo "                 | After you run this command you'll be able to just run 'patcher' from anywhere."
+		echo "                 | The default name for the resulting alias is 'patcher', you can give an argument to override"
+		echo "                 | this default, such as:"
+		echo "                 |     . ./patcher setup example"
+		echo "                 | Which will allow you to run 'example' instead."
+	;;
+esac
+
+unset -f patcherstash
+unset -f patcherunstash
